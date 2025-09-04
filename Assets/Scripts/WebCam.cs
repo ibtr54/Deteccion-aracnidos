@@ -3,6 +3,7 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Threading.Tasks;
 
 #if UNITY_ANDROID
 using UnityEngine.Android;
@@ -29,7 +30,9 @@ public class WebCam : MonoBehaviour
     RenderTexture rt;
     public GameObject boundingBox;
     private Rect boundingBoxYOLO;
-
+    private Canvas canvas;
+    private RectTransform canvasRectTransform;
+    private Vector3 originScreen;
 
 #if UNITY_IOS || UNITY_WEBGL
     private bool CheckPermissionAndRaiseCallbackIfGranted(UserAuthorization authenticationType, Action authenticationGrantedAction)
@@ -79,6 +82,8 @@ public class WebCam : MonoBehaviour
 
     void Start()
     {
+        canvas = FindFirstObjectByType<Canvas>();
+        canvasRectTransform = canvas.GetComponent<RectTransform>();
         QualitySettings.vSyncCount = 0;
 
         Application.targetFrameRate = 60;
@@ -94,7 +99,10 @@ public class WebCam : MonoBehaviour
         }
 #endif
         InitializeCamera();
-        
+        float h = canvasRectTransform.rect.height;
+        float w = canvasRectTransform.rect.width;
+        float offset = h > 1500 ? 200 : 60;
+        originScreen = new Vector3(-w - offset, 0, 0);
     }
 
     public void SetIndexCamera(int index)
@@ -198,30 +206,39 @@ public class WebCam : MonoBehaviour
         //I have no idea, why the below code works.
         boundingBox.GetComponent<RectTransform>().anchoredPosition = new Vector3(-actualCam.width,actualCam.height,0);
 
-        StartCoroutine(DelayedInference(1.2f));
+        DelayedInference(1.2f);
 
     }
 
-    IEnumerator DelayedInference(float seconds)
+    async void DelayedInference(float seconds)
     {
-        yield return new WaitForSeconds(0.5f);
+        await Task.Delay(500);
+        texture2D = new Texture2D(actualCam.width, actualCam.height, TextureFormat.ARGB32, false);
+        RectTransform bboxRTransform = boundingBox.GetComponent<RectTransform>();
+        float h = canvasRectTransform.rect.height;
+        float w = canvasRectTransform.rect.width;
+        //Vector3 originScreen = new Vector3(-w - (h > 1500? 200 : 60) , 0, 0);
+        //yield return new WaitForSeconds(0.5f);
         while (true)
         {
             if (isCamAvailable && actualCam != null && actualCam.isPlaying)
             {
-                yield return new WaitForSeconds(seconds);
+                await Task.Delay((int)(seconds * 1000.0f));
 
-                texture2D = new Texture2D(actualCam.width, actualCam.height, TextureFormat.ARGB32, false);
+                float scale_factor_x = h > 1596 && h < 1602 ? 1.9f : h > 1500 ? 2.0f : h < 1350 ? 1.61f : 1.7f;
+                float scale_factor_y = h > 1596 && h < 1602 ? 2.1f : h > 1500 ? 2.15f : h < 1350 ? 1.75f : 1.85f;
                 texture2D.SetPixels32(actualCam.GetPixels32());
-                Color pixelValue = actualCam.GetPixel(20, 100);
+                //Color pixelValue = actualCam.GetPixel(20, 100);
                 //Debug.Log("Valor WebCamTexture pixel en (20,100): " + pixelValue.r + ", " + pixelValue.g + ", " + pixelValue.b);
-                texture2D.Apply();
-                Resources.UnloadUnusedAssets();
-                boundingBox.GetComponent<RectTransform>().anchoredPosition = new Vector3(-actualCam.width, actualCam.height, 0);
+                texture2D.Apply(false);
+                //_ = Resources.UnloadUnusedAssets();
+                //bboxRTransform.anchoredPosition = new Vector3(-actualCam.width, actualCam.height, 0);
+                bboxRTransform.anchoredPosition = originScreen;
+                //Debug.Log(canvasRectTransform.localScale.x);
                 boundingBoxYOLO = inf.RunYOLO(texture2D);
-                Vector2 actualPos = boundingBox.GetComponent<RectTransform>().anchoredPosition;
-                boundingBox.GetComponent<RectTransform>().anchoredPosition = new Vector2(actualPos.x + (boundingBoxYOLO.x*2.0f)+180, actualPos.y - (boundingBoxYOLO.y*2.0f)-40);
-                boundingBox.GetComponent<RectTransform>().sizeDelta=new Vector2(boundingBoxYOLO.width*2,boundingBoxYOLO.height * 2);
+                Vector2 actualPos = bboxRTransform.anchoredPosition;
+                bboxRTransform.anchoredPosition = new Vector2(actualPos.x + ((boundingBoxYOLO.x + boundingBoxYOLO.width)* scale_factor_x), actualPos.y - ((boundingBoxYOLO.y + boundingBoxYOLO.height) * scale_factor_y));
+                bboxRTransform.sizeDelta=new Vector2(boundingBoxYOLO.width* scale_factor_x, boundingBoxYOLO.height * scale_factor_y);
             }
         }
        
@@ -229,6 +246,10 @@ public class WebCam : MonoBehaviour
 
     private void Update()
     {
+        float h = canvasRectTransform.rect.height;
+        float w = canvasRectTransform.rect.width;
+        float offset = h>1596 && h<1602 ? 220 : h > 1500 ? 260 : h < 1350 ? -20 : 60;
+        originScreen = new Vector3(-w - offset, 0, 0);
         if (!isCamAvailable || actualCam == null) return;
 
         if (fit != null)
