@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
@@ -33,6 +33,8 @@ public class WebCam : MonoBehaviour
     private Canvas canvas;
     private RectTransform canvasRectTransform;
     private Vector3 originScreen;
+    private Vector3[] cornersPos;
+    private RectTransform webCamRectTransform;
 
 #if UNITY_IOS || UNITY_WEBGL
     private bool CheckPermissionAndRaiseCallbackIfGranted(UserAuthorization authenticationType, Action authenticationGrantedAction)
@@ -85,9 +87,9 @@ public class WebCam : MonoBehaviour
         canvas = FindFirstObjectByType<Canvas>();
         canvasRectTransform = canvas.GetComponent<RectTransform>();
         QualitySettings.vSyncCount = 0;
-
+        cornersPos = new Vector3[4];
         Application.targetFrameRate = 60;
-
+        webCamRectTransform = this.GetComponent<RectTransform>();
 #if UNITY_IOS || UNITY_WEBGL
         StartCoroutine(AskForPermissionIfRequired(UserAuthorization.WebCam, () => { InitializeCamera(); }));
         return;
@@ -99,10 +101,10 @@ public class WebCam : MonoBehaviour
         }
 #endif
         InitializeCamera();
-        float h = canvasRectTransform.rect.height;
-        float w = canvasRectTransform.rect.width;
-        float offset = h > 1500 ? 200 : 60;
-        originScreen = new Vector3(-w - offset, 0, 0);
+        //float h = canvasRectTransform.rect.height;
+        //float w = canvasRectTransform.rect.width;
+        //float offset = h > 1500 ? 200 : 60;
+        //originScreen = new Vector3(-w - offset, 0, 0);
     }
 
     public void SetIndexCamera(int index)
@@ -202,43 +204,88 @@ public class WebCam : MonoBehaviour
 
         isCamAvailable = true;
 
+        webCamRectTransform.GetWorldCorners(cornersPos);
+        originScreen = cornersPos[1];
         //Move Bounding Box to origin
         //I have no idea, why the below code works.
-        boundingBox.GetComponent<RectTransform>().anchoredPosition = new Vector3(-actualCam.width,actualCam.height,0);
-
-        DelayedInference(1.2f);
+        boundingBox.GetComponent<RectTransform>().position = originScreen;
+        StartCoroutine(DelayedInference(1.2f));
 
     }
 
-    async void DelayedInference(float seconds)
+    IEnumerator DelayedInference(float seconds)
     {
-        await Task.Delay(500);
+        //yield return new WaitForSeconds(0.7f);
         texture2D = new Texture2D(actualCam.width, actualCam.height, TextureFormat.ARGB32, false);
         RectTransform bboxRTransform = boundingBox.GetComponent<RectTransform>();
+        //bboxRTransform.position = originScreen;
         float h = canvasRectTransform.rect.height;
         float w = canvasRectTransform.rect.width;
         //Vector3 originScreen = new Vector3(-w - (h > 1500? 200 : 60) , 0, 0);
         //yield return new WaitForSeconds(0.5f);
+
+        float scale_factor_x = (cornersPos[2].x - cornersPos[1].x) / actualCam.width;
+        float scale_factor_y = (cornersPos[1].y - cornersPos[0].y) / actualCam.height;
+
+        //Debug.Log("Scale X: " + scale_factor_x);
+        //Debug.Log("Scale Y: " + scale_factor_y);
+
         while (true)
         {
             if (isCamAvailable && actualCam != null && actualCam.isPlaying)
             {
-                await Task.Delay((int)(seconds * 1000.0f));
+                //await Task.Delay((int)(seconds * 1000.0f));
+                
+                yield return new WaitForSeconds((int) seconds);
 
-                float scale_factor_x = h > 1596 && h < 1602 ? 1.9f : h > 1500 ? 2.0f : h < 1350 ? 1.61f : 1.7f;
-                float scale_factor_y = h > 1596 && h < 1602 ? 2.1f : h > 1500 ? 2.15f : h < 1350 ? 1.75f : 1.85f;
+                //What the fuck?
+                //float scale_factor_x = h > 1700 ? 2.0f : h > 1596 && h < 1602 ? 1.9f : h > 1500 ? 2.0f : h < 1350 ? 1.61f : 1.7f;
+                //float scale_factor_y = h > 1700 ? 2.35f : h > 1596 && h < 1602 ? 2.1f : h > 1500 ? 2.15f : h < 1350 ? 1.75f : 1.85f;
+
+
+
+
                 texture2D.SetPixels32(actualCam.GetPixels32());
                 //Color pixelValue = actualCam.GetPixel(20, 100);
                 //Debug.Log("Valor WebCamTexture pixel en (20,100): " + pixelValue.r + ", " + pixelValue.g + ", " + pixelValue.b);
                 texture2D.Apply(false);
                 //_ = Resources.UnloadUnusedAssets();
                 //bboxRTransform.anchoredPosition = new Vector3(-actualCam.width, actualCam.height, 0);
-                bboxRTransform.anchoredPosition = originScreen;
+
                 //Debug.Log(canvasRectTransform.localScale.x);
+                
+                webCamRectTransform.GetWorldCorners(cornersPos);
+                originScreen = cornersPos[1];
+                bboxRTransform.position = originScreen;
+                scale_factor_x = (cornersPos[2].x - cornersPos[1].x) / texture2D.width;
+                scale_factor_y = (cornersPos[1].y - cornersPos[0].y) / texture2D.height;
                 boundingBoxYOLO = inf.RunYOLO(texture2D);
-                Vector2 actualPos = bboxRTransform.anchoredPosition;
-                bboxRTransform.anchoredPosition = new Vector2(actualPos.x + ((boundingBoxYOLO.x + boundingBoxYOLO.width)* scale_factor_x), actualPos.y - ((boundingBoxYOLO.y + boundingBoxYOLO.height) * scale_factor_y));
-                bboxRTransform.sizeDelta=new Vector2(boundingBoxYOLO.width* scale_factor_x, boundingBoxYOLO.height * scale_factor_y);
+                //boundingBoxYOLO = await Task.Run(()=> { return inf.RunYOLO(texture2D); });
+                //Vector2 actualPos = bboxRTransform.position;
+                //bboxRTransform.position = new Vector2(originScreen.x + (boundingBoxYOLO.x * scale_factor_x) + ((boundingBoxYOLO.width/2)*scale_factor_x), originScreen.y - (boundingBoxYOLO.y * scale_factor_y) + ((boundingBoxYOLO.height / 2) * scale_factor_y));
+                //bboxRTransform.position = new Vector2(originScreen.x + ((boundingBoxYOLO.x / texture2D.width)*(cornersPos[2].x - cornersPos[1].x)) + (((boundingBoxYOLO.width / texture2D.width) * (cornersPos[2].x - cornersPos[1].x))/2), originScreen.y - ((boundingBoxYOLO.y / texture2D.height) * (cornersPos[1].y - cornersPos[0].y)) + (((boundingBoxYOLO.height / texture2D.height) * (cornersPos[1].y - cornersPos[0].y)) / 2));
+
+                //bboxRTransform.sizeDelta=new Vector2((boundingBoxYOLO.width/texture2D.width) * (cornersPos[2].x - cornersPos[1].x), (boundingBoxYOLO.height / texture2D.height) * (cornersPos[1].y - cornersPos[0].y));
+                //bboxRTransform.position = new Vector2(originScreen.x + ((boundingBoxYOLO.x / texture2D.width) * (webCamRectTransform.rect.width)) + (((boundingBoxYOLO.width / texture2D.width) * (webCamRectTransform.rect.width)) / 2), originScreen.y - ((boundingBoxYOLO.y / texture2D.height) * (webCamRectTransform.rect.height)) + (((boundingBoxYOLO.height / texture2D.height) * (webCamRectTransform.rect.height)) / 2));
+                //bboxRTransform.sizeDelta = new Vector2((boundingBoxYOLO.width / texture2D.width) * (webCamRectTransform.rect.width), (boundingBoxYOLO.height / texture2D.height) * (webCamRectTransform.rect.height));
+                float scaledW = (boundingBoxYOLO.width / texture2D.width) * (cornersPos[2].x - cornersPos[1].x);
+                float scaledH = (boundingBoxYOLO.height / texture2D.height) * (cornersPos[1].y - cornersPos[0].y);
+
+                float scaledX = (boundingBoxYOLO.x / texture2D.width) * (cornersPos[2].x - cornersPos[1].x);
+                float scaledY = (boundingBoxYOLO.y / texture2D.height) * (cornersPos[1].y - cornersPos[0].y);
+
+                // --- IMPORTANTE ---
+                // Convertimos desde coords "arriba-izq" de la textura a coords de mundo
+                // Punto central del bbox en coords locales del RawImage
+                float localX = scaledX + scaledW / 2f;
+                float localY = -scaledY - scaledH / 2f; // invertimos Y porque imagen va de arriba→abajo
+
+                // Trasladar desde local space del RawImage a world space
+                Vector3 worldPos = new Vector3(localX, localY, 0);
+
+                // Asignar al bbox
+                bboxRTransform.position = worldPos;
+                bboxRTransform.sizeDelta = new Vector2(scaledW, scaledH);
             }
         }
        
@@ -246,10 +293,15 @@ public class WebCam : MonoBehaviour
 
     private void Update()
     {
-        float h = canvasRectTransform.rect.height;
-        float w = canvasRectTransform.rect.width;
-        float offset = h>1596 && h<1602 ? 220 : h > 1500 ? 260 : h < 1350 ? -20 : 60;
-        originScreen = new Vector3(-w - offset, 0, 0);
+        //GetWorldCorners function save my life, thanks to the guy who programs this function.
+        //webCamRectTransform.GetWorldCorners(cornersPos);
+
+
+        //float h = canvasRectTransform.rect.height;
+        //float w = canvasRectTransform.rect.width;
+        //float offset = h>1596 && h<1602 ? 220 : h > 1500 ? 260 : h < 1350 ? -20 : 60;
+        //originScreen = new Vector3(-w - offset, 0, 0);
+        //originScreen = cornersPos[1];
         if (!isCamAvailable || actualCam == null) return;
 
         if (fit != null)
