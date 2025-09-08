@@ -229,7 +229,7 @@ public class WebCam : MonoBehaviour
 
         //Debug.Log("Scale X: " + scale_factor_x);
         //Debug.Log("Scale Y: " + scale_factor_y);
-
+       
         while (true)
         {
             if (isCamAvailable && actualCam != null && actualCam.isPlaying)
@@ -253,39 +253,50 @@ public class WebCam : MonoBehaviour
                 //bboxRTransform.anchoredPosition = new Vector3(-actualCam.width, actualCam.height, 0);
 
                 //Debug.Log(canvasRectTransform.localScale.x);
-                
-                webCamRectTransform.GetWorldCorners(cornersPos);
-                originScreen = cornersPos[1];
-                bboxRTransform.position = originScreen;
-                scale_factor_x = (cornersPos[2].x - cornersPos[1].x) / texture2D.width;
-                scale_factor_y = (cornersPos[1].y - cornersPos[0].y) / texture2D.height;
-                boundingBoxYOLO = inf.RunYOLO(texture2D);
-                //boundingBoxYOLO = await Task.Run(()=> { return inf.RunYOLO(texture2D); });
-                //Vector2 actualPos = bboxRTransform.position;
-                //bboxRTransform.position = new Vector2(originScreen.x + (boundingBoxYOLO.x * scale_factor_x) + ((boundingBoxYOLO.width/2)*scale_factor_x), originScreen.y - (boundingBoxYOLO.y * scale_factor_y) + ((boundingBoxYOLO.height / 2) * scale_factor_y));
-                //bboxRTransform.position = new Vector2(originScreen.x + ((boundingBoxYOLO.x / texture2D.width)*(cornersPos[2].x - cornersPos[1].x)) + (((boundingBoxYOLO.width / texture2D.width) * (cornersPos[2].x - cornersPos[1].x))/2), originScreen.y - ((boundingBoxYOLO.y / texture2D.height) * (cornersPos[1].y - cornersPos[0].y)) + (((boundingBoxYOLO.height / texture2D.height) * (cornersPos[1].y - cornersPos[0].y)) / 2));
 
-                //bboxRTransform.sizeDelta=new Vector2((boundingBoxYOLO.width/texture2D.width) * (cornersPos[2].x - cornersPos[1].x), (boundingBoxYOLO.height / texture2D.height) * (cornersPos[1].y - cornersPos[0].y));
-                //bboxRTransform.position = new Vector2(originScreen.x + ((boundingBoxYOLO.x / texture2D.width) * (webCamRectTransform.rect.width)) + (((boundingBoxYOLO.width / texture2D.width) * (webCamRectTransform.rect.width)) / 2), originScreen.y - ((boundingBoxYOLO.y / texture2D.height) * (webCamRectTransform.rect.height)) + (((boundingBoxYOLO.height / texture2D.height) * (webCamRectTransform.rect.height)) / 2));
-                //bboxRTransform.sizeDelta = new Vector2((boundingBoxYOLO.width / texture2D.width) * (webCamRectTransform.rect.width), (boundingBoxYOLO.height / texture2D.height) * (webCamRectTransform.rect.height));
-                float scaledW = (boundingBoxYOLO.width / texture2D.width) * (cornersPos[2].x - cornersPos[1].x);
-                float scaledH = (boundingBoxYOLO.height / texture2D.height) * (cornersPos[1].y - cornersPos[0].y);
 
-                float scaledX = (boundingBoxYOLO.x / texture2D.width) * (cornersPos[2].x - cornersPos[1].x);
-                float scaledY = (boundingBoxYOLO.y / texture2D.height) * (cornersPos[1].y - cornersPos[0].y);
+                //Dont use Get WorldCorners, just get the Top Left Corner anchored position and then convert it to world position.
+                //The anchor position of webCamera is the center of all canvas.
+                //webCamRectTransform.GetWorldCorners(cornersPos);
+                originScreen = new Vector3(-webCamRectTransform.rect.width * 0.5f, webCamRectTransform.rect.height * 0.5f, 0);
+                //bboxRTransform.position = originScreen;
 
-                // --- IMPORTANTE ---
-                // Convertimos desde coords "arriba-izq" de la textura a coords de mundo
-                // Punto central del bbox en coords locales del RawImage
+                //Debug.Log("A Started");
+
+                yield return StartCoroutine(inf.RunYOLO(texture2D));
+
+                //yield return null;
+                boundingBoxYOLO = inf.bbox;
+
+                float scale = Mathf.Min(webCamRectTransform.rect.width / texture2D.width, webCamRectTransform.rect.height / texture2D.height);
+
+                //webCamRectTransform.rect.width is different to (cornersPos[2].x - cornersPos[1].x) and I dont now Why??????
+                //Debug.Log(webCamRectTransform.rect.width);
+                //Debug.Log((cornersPos[2].x - cornersPos[1].x));
+
+                float offsetX = (webCamRectTransform.rect.width - (texture2D.width * scale)) * 0.5f;
+                float offsetY = (webCamRectTransform.rect.height - (texture2D.height * scale)) * 0.5f;
+
+                float scaledW = (boundingBoxYOLO.width / texture2D.width) * (texture2D.width * scale);
+                float scaledH = (boundingBoxYOLO.height / texture2D.height) * (texture2D.height * scale);
+
+                float scaledX = (boundingBoxYOLO.x / texture2D.width) * (texture2D.width * scale);
+                float scaledY = (boundingBoxYOLO.y / texture2D.height) * (texture2D.height * scale);
+
+
                 float localX = scaledX + scaledW / 2f;
-                float localY = -scaledY - scaledH / 2f; // invertimos Y porque imagen va de arriba→abajo
+                float localY = -scaledY - scaledH / 2f;
 
-                // Trasladar desde local space del RawImage a world space
-                Vector3 worldPos = new Vector3(localX, localY, 0);
+                localX += offsetX;
+                localY += offsetY;
 
-                // Asignar al bbox
+                Vector3 worldPos = webCamRectTransform.TransformPoint(originScreen + new Vector3(localX, localY, 0f));
+
+
                 bboxRTransform.position = worldPos;
-                bboxRTransform.sizeDelta = new Vector2(scaledW, scaledH);
+                bboxRTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, scaledW);
+                bboxRTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, scaledH);
+                //Debug.Log("A finised");
             }
         }
        

@@ -1,6 +1,8 @@
 ﻿using UnityEngine;
 using Unity.InferenceEngine;
 using System.IO;
+using System.Threading.Tasks;
+using System.Collections;
 
 public class ModelInference : MonoBehaviour
 {
@@ -12,6 +14,9 @@ public class ModelInference : MonoBehaviour
     private bool isStartExecuted = false;
     private RenderTexture _renderTexture;
     private int targetSize = 1216;
+    public Rect bbox;
+    public IEnumerator m_Schedule;
+    int k_LayersPerFrame = 19;
 
     void Start()
     {
@@ -19,6 +24,7 @@ public class ModelInference : MonoBehaviour
             worker = new Worker(runtimeModel, BackendType.GPUCompute);
             inputTensor = new Tensor<float>(new TensorShape(1, 3, targetSize, targetSize));
             _renderTexture = new RenderTexture(targetSize, targetSize, 0, RenderTextureFormat.ARGB32);
+            bbox = new Rect(-1, -1, -1, -1); ;
     }
 
     void NormalizeInPlace(Tensor<float> t, float divisor)
@@ -39,7 +45,7 @@ public class ModelInference : MonoBehaviour
         return result;
     }
 
-    public Rect RunYOLO(Texture2D inputImage)
+    public IEnumerator RunYOLO(Texture2D inputImage)
     {
 
 
@@ -63,8 +69,17 @@ public class ModelInference : MonoBehaviour
         //Debug.Log("Valor pixel en (20,100): " + pixelValue.r + ", " + pixelValue.g + ", "+ pixelValue.b);
         TextureConverter.ToTensor(_renderTexture, inputTensor);
         //NormalizeInPlace(inputTensor, 255);
+        //worker.Schedule(inputTensor);
 
-        worker.Schedule(inputTensor);
+        //Debug.Log("B Started");
+        m_Schedule = worker.ScheduleIterable(inputTensor);
+        int it = 0;
+
+        while (m_Schedule.MoveNext())
+        {
+            if (++it % k_LayersPerFrame == 0)
+                yield return null;
+        }
         Tensor<float> outputTensor = worker.PeekOutput() as Tensor<float>;
 
         outputTensor.ReadbackRequest();
@@ -131,11 +146,15 @@ public class ModelInference : MonoBehaviour
         if (bestConf > 0)
         {
             //Debug.Log("Rect: " + bestBox.x + ", " + bestBox.y + ", " + bestBox.width + ", " + bestBox.height);
-            return bestBox;
-        }
+            bbox = bestBox;
+            //return bestBox;
 
+        }
+        else { bbox = new Rect(0, 0, 0, 0); }
+        //Debug.Log("B Finished");
         //Debug.Log("Rect: 0,0,0,0");
-        return new Rect(0, 0, 0, 0);
+        //return new Rect(0, 0, 0, 0);
+
 
     }
 
