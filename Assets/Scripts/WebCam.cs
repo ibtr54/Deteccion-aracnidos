@@ -263,8 +263,9 @@ public class WebCam : MonoBehaviour
 
                 //Debug.Log("A Started");
 
-                yield return StartCoroutine(inf.RunYOLO(texture2D));
-
+                //yield return StartCoroutine(inf.RunYOLO(texture2D));
+                yield return StartCoroutine(inf.RunOwn(texture2D));
+                //RunOwn
                 //yield return null;
                 boundingBoxYOLO = inf.bbox;
 

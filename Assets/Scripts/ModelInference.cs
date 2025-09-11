@@ -9,6 +9,8 @@ using static UnityEngine.Rendering.ProbeAdjustmentVolume;
 using System.Linq;
 using static UnityEditor.PlayerSettings;
 using System;
+using UnityEngine.UI;
+using System.Net.NetworkInformation;
 
 public class ModelInference : MonoBehaviour
 {
@@ -22,11 +24,15 @@ public class ModelInference : MonoBehaviour
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     private bool isStartExecuted = false;
     private RenderTexture _renderTexture;
+    private RenderTexture _renderTextureOwn;
     private int targetSize = 1216;
+    private int targetSizeOwn = 256;
     public Rect bbox;
     public IEnumerator m_Schedule;
     public IEnumerator m_ScheduleOwn;
-    int k_LayersPerFrame = 16;
+    int k_LayersPerFrame = 18;
+    int k_LayersPerFrameOwn = 70;
+    public RawImage test_raw;
     private string[] classes = {"animal snake", "animal spider", "car", "no object", "scorpion" };
     void Start()
     {
@@ -36,6 +42,7 @@ public class ModelInference : MonoBehaviour
         workerOwn = new Worker(runtimeModelOwn, BackendType.GPUCompute);
         inputTensor = new Tensor<float>(new TensorShape(1, 3, targetSize, targetSize));
         _renderTexture = new RenderTexture(targetSize, targetSize, 0, RenderTextureFormat.ARGB32);
+        _renderTextureOwn = new RenderTexture(targetSizeOwn, targetSizeOwn, 0, RenderTextureFormat.ARGB32);
         bbox = new Rect(-1, -1, -1, -1);
     }
 
@@ -59,7 +66,7 @@ public class ModelInference : MonoBehaviour
 
     private int getCenterPosition(byte[,] kernel)
     {
-        return (int)(kernel.Length / 2);
+        return (int)(kernel.GetLength(0) / 2);
     }
 
 
@@ -68,9 +75,9 @@ public class ModelInference : MonoBehaviour
         int centerPosRow = getCenterPosition(kernel_struct);
         int centerPosColumn = getCenterPosition(kernel_struct);
         int deltaColumn_Left = centerPosColumn - 0;
-        int deltaColumn_Right = (kernel_struct.Length - 1) - centerPosColumn;
+        int deltaColumn_Right = (kernel_struct.GetLength(0) - 1) - centerPosColumn;
         int deltaRow_Up = centerPosRow - 0;
-        int deltaRow_Down = (kernel_struct.Length - 1) - centerPosRow;
+        int deltaRow_Down = (kernel_struct.GetLength(0) - 1) - centerPosRow;
         int[,] processed_image = new int[imageY, imageX];
         for ( int i = 0 ; i < imageY ; i++ ){
             for( int j = 0 ; j < imageX ; j++ )
@@ -114,9 +121,9 @@ public class ModelInference : MonoBehaviour
         int centerPosRow = getCenterPosition(kernel_struct);
         int centerPosColumn = getCenterPosition(kernel_struct);
         int deltaColumn_Left = centerPosColumn - 0;
-        int deltaColumn_Right = (kernel_struct.Length - 1) - centerPosColumn;
+        int deltaColumn_Right = (kernel_struct.GetLength(0) - 1) - centerPosColumn;
         int deltaRow_Up = centerPosRow - 0;
-        int deltaRow_Down = (kernel_struct.Length - 1) - centerPosRow;
+        int deltaRow_Down = (kernel_struct.GetLength(0) - 1) - centerPosRow;
         int[,] processed_image = new int[imageY, imageX];
         for (int i = 0; i < imageY; i++)
         {
@@ -185,14 +192,14 @@ public class ModelInference : MonoBehaviour
             {
                 //Color c = pixels[i];
                 // Escalamos valores RGB [0,1] a [0,255]
-                float r = Mathf.Clamp01(Mathf.Abs(alpha * src[0,i,j] * 255f + beta) / 255f);
-                float g = Mathf.Clamp01(Mathf.Abs(alpha * src[1, i, j] * 255f + beta) / 255f);
-                float b = Mathf.Clamp01(Mathf.Abs(alpha * src[2, i, j] * 255f + beta) / 255f);
+                float r = Mathf.Clamp(Mathf.Abs(alpha * src[0,i,j] + beta),0.0f,255.0f);
+                float g = Mathf.Clamp(Mathf.Abs(alpha * src[1, i, j] + beta), 0.0f, 255.0f);
+                float b = Mathf.Clamp(Mathf.Abs(alpha * src[2, i, j] + beta), 0.0f, 255.0f);
 
                 //pixels[i] = new Color(r, g, b, c.a);
-                image[0, i, j] = (int)(r * 255);
-                image[1, i, j] = (int)(g * 255);
-                image[2, i, j] = (int)(b * 255);
+                image[0, i, j] = (int)(r);
+                image[1, i, j] = (int)(g);
+                image[2, i, j] = (int)(b);
 
             }           
         }
@@ -248,16 +255,16 @@ public class ModelInference : MonoBehaviour
         int[,,] tempPixelValues = new int[3,imageY, imageX];
 
         // Calcular los valores de los píxeles utilizando el kernel
-        for (int i = 0; i < imageX; ++i)
+        for (int i = 0; i < imageY; ++i)
         {
-            for (int j = 0; j < imageY; ++j)
+            for (int j = 0; j < imageX; ++j)
             {
                 int bound_left = j - deltaColumn_Left;
                 int bound_right = j + deltaColumn_Right;
                 int bound_up = i - deltaRow_Up;
                 int bound_down = i + deltaRow_Down;
 
-                if (bound_left >= 0 && bound_right < imageY && bound_up >= 0 && bound_down < imageX)
+                if (bound_left >= 0 && bound_right < imageX && bound_up >= 0 && bound_down < imageY)
                 {
                     int alt_i = 0, alt_j = 0;
                     int r_pixel_value = 0;
@@ -298,7 +305,7 @@ public class ModelInference : MonoBehaviour
         int w = imageX;
         int h = imageY;
 
-        int[,] visited = new int[w, h];
+        int[,] visited = new int[h, w];
         List<List<Vector2Int>> contours = new List<List<Vector2Int>>();
 
         int[] dx = { -1, 0, 1, -1, 1, -1, 0, 1 };
@@ -308,12 +315,12 @@ public class ModelInference : MonoBehaviour
         {
             for (int x = 1; x < w - 1; x++)
             {
-                if ( binary[x, y] == 1 && visited[x, y] == 0 )
+                if ( binary[y, x] == 1 && visited[y, x] == 0 )
                 {
                     List<Vector2Int> contour = new List<Vector2Int>();
                     Stack<Vector2Int> stack = new Stack<Vector2Int>();
                     stack.Push(new Vector2Int(x, y));
-                    visited[x, y] = 1;
+                    visited[y, x] = 1;
 
                     while (stack.Count > 0)
                     {
@@ -326,10 +333,10 @@ public class ModelInference : MonoBehaviour
                             int ny = p.y + dy[k];
                             if (nx >= 0 && nx < w && ny >= 0 && ny < h)
                             {
-                                if (binary[nx, ny] == 1 && visited[nx, ny] == 0)
+                                if (binary[ny, nx] == 1 && visited[ny, nx] == 0)
                                 {
-                                    visited[nx, ny] = 1;
-                                    stack.Push(new Vector2Int(nx, ny));
+                                    visited[ny, nx] = 1;
+                                    stack.Push(new Vector2Int(ny, nx));
                                 }
                             }
                         }
@@ -338,7 +345,6 @@ public class ModelInference : MonoBehaviour
                 }
             }
         }
-
         return contours;
     }
 
@@ -362,7 +368,7 @@ public class ModelInference : MonoBehaviour
             {
                 minX = p.x;
             }
-            if( p.x > minX )
+            if( p.x > maxX )
             {
                 maxX = p.x;
             }
@@ -372,6 +378,148 @@ public class ModelInference : MonoBehaviour
         return area;
     }
 
+    private int[,] NormalizeArray(int[,] arrayUnormalized)
+    {
+        int minR = 999999999;
+        int maxR = -999999999;
+        
+        int y = arrayUnormalized.GetLength(0);
+        int x = arrayUnormalized.GetLength(1);
+
+
+        for (int i = 0; i < y; ++i)
+        {
+            for (int j = 0; j < x; ++j)
+            {
+                minR = arrayUnormalized[i, j] < minR ? arrayUnormalized[i, j] : minR;
+                
+            }
+        }
+
+        for (int i = 0; i < y; ++i)
+        {
+            for (int j = 0; j < x; ++j)
+            {
+                maxR = arrayUnormalized[i, j] > maxR ? arrayUnormalized[i, j] : maxR;
+                
+                //maxG = GetGValue(arrayUnormalized->Canvas->Pixels[i][j]) > maxG ? GetGValue(arrayUnormalized->Canvas->Pixels[i][j]) : maxG;
+                //maxB = GetBValue(arrayUnormalized->Canvas->Pixels[i][j]) > maxB ? GetBValue(arrayUnormalized->Canvas->Pixels[i][j]) : maxB;
+            }
+        }
+
+        float r;
+        float g;
+        float b;
+        int[,] result = new int[y, x];
+        //result->Height = y;
+        //result->Width = x;
+        for (int i = 0; i < y; ++i)
+        {
+            for (int j = 0; j < x; ++j)
+            {
+                r = (float)(arrayUnormalized[i, j] - minR) / (float)(maxR - minR);
+               
+                //r = (arrayUnormalized[i,j] - minR) * 255 / (maxR - minR);
+                //int g = ((GetGValue(arrayUnormalized->Canvas->Pixels[i][j]) - minR) * 255) / (maxR - minR);
+                //int b = ((GetBValue(arrayUnormalized->Canvas->Pixels[i][j]) - minR) * 255) / (maxR - minR);
+                result[i, j] = (int)(r * 255);
+                
+                //result[i][j][0] = ((arrayUnormalized[i][j][0] - minR) * 255) / (maxR - minR);
+                //result[i][j][1] = ((arrayUnormalized[i][j][1] - minG) * 255) / (maxG - minG);
+                //result[i][j][2] = ((arrayUnormalized[i][j][2] - minB) * 255) / (maxB - minB);
+            }
+        }
+
+        //delete arrayUnormalized;
+        return result;
+    }
+
+    private int[,,]NormalizeArray(int[,,] arrayUnormalized, int x, int y)
+    {
+        int minR = 999999999;
+        int maxR = -999999999;
+        int minG = 999999999;
+        int maxG = -999999999;
+        int minB = 999999999;
+        int maxB = -999999999;
+
+
+        for (int i = 0; i < y; ++i)
+        {
+            for (int j = 0; j < x; ++j)
+            {
+                minR = arrayUnormalized[0,i,j] < minR ? arrayUnormalized[0,i,j] : minR;
+                minG = arrayUnormalized[1,i,j] < minG ? arrayUnormalized[1,i,j] : minG;
+                minB = arrayUnormalized[2,i,j] < minB ? arrayUnormalized[2,i,j] : minB;
+            }
+        }
+
+        for (int i = 0; i < y; ++i)
+        {
+            for (int j = 0; j < x; ++j)
+            {
+                maxR = arrayUnormalized[0, i, j] > maxR ? arrayUnormalized[0, i, j] : maxR;
+                maxG = arrayUnormalized[1, i, j] > maxG ? arrayUnormalized[1, i, j] : maxG;
+                maxB = arrayUnormalized[2, i, j] > maxB ? arrayUnormalized[2, i, j] : maxB;
+                //maxG = GetGValue(arrayUnormalized->Canvas->Pixels[i][j]) > maxG ? GetGValue(arrayUnormalized->Canvas->Pixels[i][j]) : maxG;
+                //maxB = GetBValue(arrayUnormalized->Canvas->Pixels[i][j]) > maxB ? GetBValue(arrayUnormalized->Canvas->Pixels[i][j]) : maxB;
+            }
+        }
+
+        float r;
+        float g;
+        float b;
+        int[,,] result = new int[3,y,x];
+        //result->Height = y;
+        //result->Width = x;
+        for (int i = 0; i < y; ++i)
+        {
+            for (int j = 0; j < x; ++j)
+            {
+                r = (float)(arrayUnormalized[0, i, j] - minR) / (float)(maxR - minR);
+                g = (float)(arrayUnormalized[1, i, j] - minG) / (float)(maxG - minG);
+                b = (float)(arrayUnormalized[2, i, j] - minB) / (float)(maxB - minB);
+                //r = (arrayUnormalized[i,j] - minR) * 255 / (maxR - minR);
+                //int g = ((GetGValue(arrayUnormalized->Canvas->Pixels[i][j]) - minR) * 255) / (maxR - minR);
+                //int b = ((GetBValue(arrayUnormalized->Canvas->Pixels[i][j]) - minR) * 255) / (maxR - minR);
+                result[0,i,j] = (int)(r * 255);
+                result[1, i, j] = (int)(g * 255);
+                result[2, i, j] = (int)(b * 255);
+                //result[i][j][0] = ((arrayUnormalized[i][j][0] - minR) * 255) / (maxR - minR);
+                //result[i][j][1] = ((arrayUnormalized[i][j][1] - minG) * 255) / (maxG - minG);
+                //result[i][j][2] = ((arrayUnormalized[i][j][2] - minB) * 255) / (maxB - minB);
+            }
+        }
+
+        //delete arrayUnormalized;
+        return result;
+    }
+
+    private int[,,] ClampImage(int[,,] arrayUnormalized)
+    {
+        
+        int y = arrayUnormalized.GetLength(1);
+        int x = arrayUnormalized.GetLength(2);
+        int[,,] result = new int[3, y, x];
+        float r;
+        float g;
+        float b;
+        for (int i = 0; i < y; ++i)
+        {
+            for (int j = 0; j < x; ++j)
+            {
+                r = Mathf.Clamp(arrayUnormalized[0, i, j],0,255);
+                g = Mathf.Clamp(arrayUnormalized[1, i, j], 0, 255);
+                b = Mathf.Clamp(arrayUnormalized[2, i, j], 0, 255);
+
+                result[0, i, j] = (int)r;
+                result[1, i, j] = (int)g;
+                result[2, i, j] = (int)b;
+            }
+        }
+
+        return result;
+    }
     public List<Rect> Rects(Texture2D inputImage)
     {
     // texture = (Texture2D)SpecMat.GetTexture(name);
@@ -382,14 +530,17 @@ public class ModelInference : MonoBehaviour
         //yield return null;
         int division_value = 100;
         int[,,] image_t = Texture2D2Byte(inputImage);
-        image_t = ConvertScaleAbs(image_t, inputImage.width, inputImage.height, 0.35f, 10.0f);
+        //ImShow(image_t);
+        image_t = ConvertScaleAbs(image_t, inputImage.width, inputImage.height, 3.5f, 10.0f);
+        //ImShow(image_t);
         int[,] laplacianFilter = { { 0, 1, 0 }, { 1, -4, 1 }, { 0, 1, 0 } };
         image_t = Correlation(image_t, inputImage.width, inputImage.height, laplacianFilter, 3);
-
-
+        //ImShow(image_t);
+        image_t = ClampImage(image_t);
+        //ImShow(image_t);
         byte[,] kernel_Rectangle = { { 1, 1, 1 }, { 1, 1, 1 }, { 1, 1, 1 } };
         int[,] image_t_gray = ToGrayscale(image_t, inputImage.width, inputImage.height);
-
+        //ImShow(image_t_gray);
         int[,] image_t_B = new int[inputImage.height, inputImage.width];
         for (int i = 0; i < inputImage.height; i++)
         {
@@ -405,7 +556,7 @@ public class ModelInference : MonoBehaviour
         }
 
         int[,] image_t_gray_B = Dilate_Operator(kernel_Rectangle, image_t_B, inputImage.width, inputImage.height);
-
+        //ImShow(NormalizeArray(image_t_gray_B));
         int[,] image_B = new int[inputImage.height, inputImage.width];
         for (int i = 0; i < inputImage.height; i++)
         {
@@ -429,33 +580,34 @@ public class ModelInference : MonoBehaviour
         {
             for (int j = 0; j < inputImage.width; j++)
             {
-                gradiente[i, j] = (byte)Mathf.Floor(Mathf.Abs(dilate_image[i, j] - erosion_image[i, j]));
+                gradiente[i, j] = Mathf.Abs(dilate_image[i, j] - erosion_image[i, j]);
             }
         }
-
+        //ImShow(NormalizeArray(gradiente));
 
         int[,] closed = Dilate_Operator(kernel_Rectangle, gradiente, inputImage.width, inputImage.height);
         closed = Dilate_Operator(kernel_Rectangle, closed, inputImage.width, inputImage.height);
 
+        //ImShow(NormalizeArray(closed));
 
         int[,] closed_uint8 = new int[inputImage.height, inputImage.width];
         for (int i = 0; i < inputImage.height; i++)
         {
             for (int j = 0; j < inputImage.width; j++)
             {
-                closed_uint8[i, j] = gradiente[i, j] | image_t_B[i,j];
+                closed_uint8[i, j] = closed[i, j] | image_t_B[i,j];
             }
         }
-
+        //ImShow(NormalizeArray(closed_uint8));
         closed_uint8 = Erosion_Operator(kernel_Rectangle, closed_uint8, inputImage.width, inputImage.height);
-
-        for (int i = 0; i < inputImage.height; i++)
-        {
-            for (int j = 0; j < inputImage.width; j++)
-            {
-                closed_uint8[i, j] = closed_uint8[i, j] * 255;
-            }
-        }
+        //ImShow(NormalizeArray(closed_uint8));
+        //for (int i = 0; i < inputImage.height; i++)
+        //{
+        //    for (int j = 0; j < inputImage.width; j++)
+        //    {
+        //        closed_uint8[i, j] = closed_uint8[i, j] * 255;
+        //    }
+        //}
 
         List<List<Vector2Int>> contours = FindContours(closed_uint8,inputImage.width,inputImage.height);
 
@@ -466,7 +618,7 @@ public class ModelInference : MonoBehaviour
         {
             Rect tempBoundingBox = new Rect();
             area = GetArea(contours[i],ref tempBoundingBox);
-            if (area > 120 && area < (inputImage.width* inputImage.height* 0.80)){
+            if (area > 120 && area < (inputImage.width* inputImage.height* 0.80) && tempBoundingBox.width > 15 && tempBoundingBox.height > 15){
                 //x, y, w, h = cv2.boundingRect(cnt)
                 bounding_boxes.Add(tempBoundingBox);
                 //bounding_boxes.append([x, y, w, h])
@@ -493,6 +645,90 @@ public class ModelInference : MonoBehaviour
         return index;
     }
 
+    public static Texture2D ToTexture2D(int[,,] array)
+    {
+        int channels = array.GetLength(0);
+        int height = array.GetLength(1);
+        int width = array.GetLength(2);
+
+        if (channels < 3)
+        {
+            Debug.LogError("The array must have 3 channels (R,G,B).");
+            return null;
+        }
+
+        Texture2D tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+        Color32[] pixels = new Color32[width * height];
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                byte r = (byte)Mathf.Clamp(array[0, y, x], 0, 255);
+                byte g = (byte)Mathf.Clamp(array[1, y, x], 0, 255);
+                byte b = (byte)Mathf.Clamp(array[2, y, x], 0, 255);
+
+                // Nota: invertimos el eje Y para que la imagen no salga "al revés"
+                int idx = y * width + x;//(height - 1 - y) * width + x;
+                pixels[idx] = new Color32(r, g, b, 255);
+            }
+        }
+
+        tex.SetPixels32(pixels);
+        tex.Apply();
+
+
+        return tex;
+    }
+
+    public static Texture2D ToTexture2D(int[,] array)
+    {
+        //
+        //int channels = array.GetLength(0);
+        int channels = 1;
+        int height = array.GetLength(0);
+        int width = array.GetLength(1);
+
+        Texture2D tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+        Color32[] pixels = new Color32[width * height];
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                byte r = (byte)Mathf.Clamp(array[y, x], 0, 255);
+                byte g = (byte)Mathf.Clamp(array[y, x], 0, 255);
+                byte b = (byte)Mathf.Clamp(array[y, x], 0, 255);
+
+                
+                int idx = y * width + x;//(height - 1 - y) * width + x;
+                pixels[idx] = new Color32(r, g, b, 255);
+            }
+        }
+
+        tex.SetPixels32(pixels);
+        tex.Apply();
+
+
+        return tex;
+    }
+
+    private void ImShow(int[,,] img)
+    {
+        Texture2D tex = ToTexture2D(img);       
+        byte[] rawData = tex.EncodeToPNG();
+        System.IO.File.WriteAllBytes("../debug_frame.png", rawData);
+        Debug.Log("Guardada imagen en debug_frame.png");
+    }
+
+    private void ImShow(int[,] img)
+    {
+        Texture2D tex = ToTexture2D(img);
+        byte[] rawData = tex.EncodeToPNG();
+        System.IO.File.WriteAllBytes("../debug_frame.png", rawData);
+        Debug.Log("Guardada imagen en debug_frame.png");
+    }
+
     public IEnumerator RunOwn(Texture2D inputImage)
     {
         List<Rect> bounding_boxes = Rects(inputImage);
@@ -502,26 +738,29 @@ public class ModelInference : MonoBehaviour
         for (int i = 0; i < num_show; i++)
         {
             Rect r = bounding_boxes[i];
-
-            Color[] pixels = inputImage.GetPixels((int)r.x, (int)r.y, (int)r.width, (int)r.height);
-            Texture2D cropped = new Texture2D((int)r.width, (int)r.height, TextureFormat.RGBA32, false);
+            int x = Mathf.Clamp((int)r.x, 0, inputImage.width - 1);
+            int y = Mathf.Clamp((int)r.y, 0, inputImage.height - 1);
+            int w = Mathf.Clamp((int)r.width, 1, inputImage.width - x);
+            int h = Mathf.Clamp((int)r.height, 1, inputImage.height - y);
+            Color[] pixels = inputImage.GetPixels((int)x, (int)y, (int)w, (int)h);
+            Texture2D cropped = new Texture2D((int)w, (int)h, TextureFormat.RGB24, false);
             cropped.SetPixels(pixels);
             cropped.Apply();
 
             //subimages.Add(cropped);
             //pos.Add(new Vector2Int(r.x, r.y));
             //size_img.Add(new Vector2Int(r.width, r.height));
-            Texture2D resized = new Texture2D(256, 256, TextureFormat.RGBA32, false);
-            Graphics.ConvertTexture(cropped, resized);
-
-            Tensor<float> inputTensor = new Tensor<float>(new TensorShape(1, 4, resized.height, resized.width));
-            TextureConverter.ToTensor(resized, inputTensor);
+            //Texture2D resized = new Texture2D(256, 256, TextureFormat.RGB24, false);
+            //Graphics.ConvertTexture(cropped, resized);
+            Graphics.Blit(cropped, _renderTextureOwn);
+            Tensor<float> inputTensor = new Tensor<float>(new TensorShape(1, 3, targetSizeOwn, targetSizeOwn));
+            TextureConverter.ToTensor(_renderTextureOwn, inputTensor);
 
             int it = 0;
             m_ScheduleOwn = workerOwn.ScheduleIterable(inputTensor);
             while ( m_ScheduleOwn.MoveNext() )
             {
-                if ( ++it % k_LayersPerFrame == 0 )
+                if ( ++it % k_LayersPerFrameOwn == 0 )
                     yield return null;
             }
             Tensor<float> outputTensor = workerOwn.PeekOutput() as Tensor<float>;
