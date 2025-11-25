@@ -7,7 +7,7 @@ using Unity.VisualScripting;
 using System.Collections.Generic;
 using static UnityEngine.Rendering.ProbeAdjustmentVolume;
 using System.Linq;
-using static UnityEditor.PlayerSettings;
+//using static UnityEditor.PlayerSettings;
 using System;
 using UnityEngine.UI;
 using System.Net.NetworkInformation;
